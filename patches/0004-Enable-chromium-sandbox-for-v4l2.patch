@@ -1,0 +1,185 @@
+commit 68bb544e6b7a393fcb71f9ec4306dab6555abc79
+Author: Anuma Rathore <arathore@nvidia.com>
+Date:   Fri Feb 19 00:54:15 2021 -0800
+
+    0002-Enable-chromium-sandbox-for-v4l2
+    
+    Chrome: 90.0.4400.4
+    
+    This patch enables chromium v4l2 playback in sandboxed mode.
+    This patch mainly contains changes to preload v4l2 libraries,
+    explicitly grant access to required device nodes like
+    /dev/nvhost-nvdec and permission to call some required system
+    APIs like readlink() even in sandboxed mode.
+    
+    Note 1:
+     This patch needs workaround in libv4l2_nvvideocodec.so to use
+     /proc/<pid>/ instead of using /proc/self. Patch for this is already
+     shared internally.
+    
+    Note 2:
+      The second method discussed below is another possible way to solve the
+      isue but is currently out of scope due to limitations in the tegrav4l2
+      libraries for multiple decodes. 
+      If we need to avoid modifying libv4l2_nvvideocodec.so, we need to make
+      sure that the code that needs /proc/self is executed before sandboxing.
+      This code gets triggered when we call v4l2_fd_open() in
+      GenericV4L2Device::OpenDevicePath which tries to scan all libraries
+      in plugin directory and initialize plugins.
+    
+      We will need a static function that does all mentioned above and call
+      that function from PreSandboxStartup() in gpu_main.cc. We will also
+      have to move calling code of
+      GenericV4L2Device::PostSandboxInitialization() to PreSandboxStartup().
+      There are already some similar example calls available there. For
+      example - media::DXVAVideoDecodeAccelerator::PreSandboxInitialization()
+    
+      If we implement above, then we can also remove permission to /proc which
+      is granted by this patch and we should not be ideally granting permission
+      to /proc in sandboxed mode. 
+    
+    Bug 3213265
+
+diff --git a/content/gpu/gpu_sandbox_hook_linux.cc b/content/gpu/gpu_sandbox_hook_linux.cc
+index ce5bcc4..e76f4a0 100644
+--- a/content/gpu/gpu_sandbox_hook_linux.cc
++++ b/content/gpu/gpu_sandbox_hook_linux.cc
+@@ -89,6 +89,13 @@ inline bool UseNvidiaV4L2() {
+ #endif
+ }
+ 
++inline bool UseLinuxV4L2() {
++#if BUILDFLAG(USE_LINUX_V4L2)
++  return true;
++#endif
++  return false;
++}
++
+ #if BUILDFLAG(IS_CHROMEOS_ASH) && defined(__aarch64__)
+ static const char kLibGlesPath[] = "/usr/lib64/libGLESv2.so.2";
+ static const char kLibEglPath[] = "/usr/lib64/libEGL.so.1";
+@@ -122,27 +129,52 @@ constexpr int dlopen_flag = RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE;
+ void AddV4L2GpuPermissions(
+     std::vector<BrokerFilePermission>* permissions,
+     const sandbox::policy::SandboxSeccompBPF::Options& options) {
+-  if (options.accelerated_video_decode_enabled) {
+-    // Device nodes for V4L2 video decode accelerator drivers.
+-    // We do not use a FileEnumerator because the device files may not exist
+-    // yet when the sandbox is created. But since we are restricting access
+-    // to the video-dec* and media-dec* prefixes we know that we cannot
+-    // authorize a non-decoder device by accident.
+-    static constexpr size_t MAX_V4L2_DECODERS = 5;
+-    static const base::FilePath::CharType kDevicePath[] =
+-        FILE_PATH_LITERAL("/dev/");
+-    static const base::FilePath::CharType kVideoDecBase[] = "video-dec";
+-    static const base::FilePath::CharType kMediaDecBase[] = "media-dec";
+-    for (size_t i = 0; i < MAX_V4L2_DECODERS; i++) {
+-      std::ostringstream decoderPath;
+-      decoderPath << kDevicePath << kVideoDecBase << i;
+-      permissions->push_back(
+-          BrokerFilePermission::ReadWrite(decoderPath.str()));
+-
+-      std::ostringstream mediaDevicePath;
+-      mediaDevicePath << kDevicePath << kMediaDecBase << i;
+-      permissions->push_back(
+-          BrokerFilePermission::ReadWrite(mediaDevicePath.str()));
++    if (options.accelerated_video_decode_enabled) {
++      if (UseLinuxV4L2()) {
++        static const char* const kNvidiaDevicesList[] = {
++          /* Specific to Xavier and Jetson-NX configuration */
++          "/dev/nvhost-nvdec",
++          "/dev/nvhost-nvdec1",
++          "/dev/nvhost-vic",
++          "/dev/tegra_dc_ctrl",
++          "/dev/tegra_dc_0",
++          "/dev/tegra_dc_1",
++          "/dev/tegra_dc_2",
++          "/dev/fb0",
++          "/dev/fb1",
++          "/dev/fb2",
++        };
++      for (const char* devicePath : kNvidiaDevicesList) {
++        permissions->push_back(BrokerFilePermission::ReadWrite(devicePath));
++      }
++      permissions->push_back(BrokerFilePermission::ReadOnly("/usr/lib/aarch64-linux-gnu/libv4lconvert.so.0"));
++
++      permissions->push_back(BrokerFilePermission::ReadOnlyRecursive("/usr/lib/aarch64-linux-gnu/libv4l/plugins/"));
++
++      permissions->push_back(BrokerFilePermission::ReadOnlyRecursive("/proc/"));
++
++    } else {
++      // Device nodes for V4L2 video decode accelerator drivers.
++      // We do not use a FileEnumerator because the device files may not exist
++      // yet when the sandbox is created. But since we are restricting access
++      // to the video-dec* and media-dec* prefixes we know that we cannot
++      // authorize a non-decoder device by accident.
++      static constexpr size_t MAX_V4L2_DECODERS = 5;
++      static const base::FilePath::CharType kDevicePath[] =
++          FILE_PATH_LITERAL("/dev/");
++      static const base::FilePath::CharType kVideoDecBase[] = "video-dec";
++      static const base::FilePath::CharType kMediaDecBase[] = "media-dec";
++      for (size_t i = 0; i < MAX_V4L2_DECODERS; i++) {
++        std::ostringstream decoderPath;
++        decoderPath << kDevicePath << kVideoDecBase << i;
++        permissions->push_back(
++            BrokerFilePermission::ReadWrite(decoderPath.str()));
++
++        std::ostringstream mediaDevicePath;
++        mediaDevicePath << kDevicePath << kMediaDecBase << i;
++        permissions->push_back(
++            BrokerFilePermission::ReadWrite(mediaDevicePath.str()));
++      }
+     }
+   }
+ 
+@@ -375,6 +407,11 @@ std::vector<BrokerFilePermission> FilePermissionsForGpu(
+     }
+   }
+ 
++  if(UseLinuxV4L2()) {
++    AddV4L2GpuPermissions(&permissions, options);
++    AddArmGpuPermissions(&permissions);
++  }
++
+   AddStandardGpuPermissions(&permissions);
+   return permissions;
+ }
+@@ -435,8 +472,14 @@ bool IsAcceleratedVideoEnabled(
+ 
+ void LoadV4L2Libraries(
+     const sandbox::policy::SandboxSeccompBPF::Options& options) {
+-  if (IsAcceleratedVideoEnabled(options) && UseLibV4L2()) {
+-    dlopen(kLibV4l2Path, dlopen_flag);
++  if (IsAcceleratedVideoEnabled(options)) {
++    if (UseLibV4L2() || UseLinuxV4L2()) {
++      if(dlopen(kLibV4l2Path, dlopen_flag)) {
++        LOG(INFO) <<" Preloaded V4L2 library: " << kLibV4l2Path;
++      } else {
++        LOG(WARNING) << "dlopen for " << kLibV4l2Path << " failed with error: " << dlerror();
++      }
++  }
+ 
+     if (options.accelerated_video_encode_enabled) {
+       // This is a device-specific encoder plugin.
+@@ -465,6 +508,9 @@ bool LoadLibrariesForGpu(
+     }
+     if (options.use_amd_specific_policies)
+       return LoadAmdGpuLibraries();
++  } else if (UseLinuxV4L2()) {
++    LoadV4L2Libraries(options);
++    LoadArmGpuLibraries();
+   } else {
+     if (UseChromecastSandboxAllowlist() && IsArchitectureArm()) {
+       LoadArmGpuLibraries();
+@@ -483,8 +529,9 @@ sandbox::syscall_broker::BrokerCommandSet CommandSetForGPU(
+   command_set.set(sandbox::syscall_broker::COMMAND_ACCESS);
+   command_set.set(sandbox::syscall_broker::COMMAND_OPEN);
+   command_set.set(sandbox::syscall_broker::COMMAND_STAT);
+-  if (IsChromeOS() && (options.use_amd_specific_policies ||
+-                       options.use_intel_specific_policies)) {
++  if ((IsChromeOS() && (options.use_amd_specific_policies ||
++                       options.use_intel_specific_policies)) ||
++      UseLinuxV4L2()) {
+     command_set.set(sandbox::syscall_broker::COMMAND_READLINK);
+   }
+   return command_set;
