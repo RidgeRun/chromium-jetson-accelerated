@@ -14,6 +14,8 @@ PATCHES_REPO=https://github.com/RidgeRun/chromium-jetson-accelerated.git
 PATCHES_BRANCH=v90.0.4400.4
 PATCHES_DIR=${CHROMIUM_DIR}/patches
 
+OUTPUT_DIR=${HOME}/chromium_output
+
 msg() {
     echo
     echo "$1"
@@ -74,7 +76,8 @@ build_chromium() {
     # Build
     autoninja -C out/release-90/ chrome chrome_sandbox "chrome/installer/linux:unstable_deb"
     
-    msg "Build done! You can find the output in ${CHROMIUM_SRC_DIR}/out/release-90/chromium-browser-unstable_90.0.4400.4-1_arm64.deb"
+    cp ${CHROMIUM_SRC_DIR}/out/release-90/chromium-browser-unstable_90.0.4400.4-1_arm64.deb $OUTPUT_DIR
+    msg "Build done!"
 }
 
 # Do stuff
