@@ -28,8 +28,8 @@ prepare() {
     mkdir -p ${WORK_DIR}
     mkdir -p ${CHROMIUM_DIR}
     apt-get update
-    apt-get install -y git curl wget lsb-release vim sudo
-    ln -s /usr/bin/python3.6 /usr/bin/python
+    apt-get install -y git curl wget lsb-release vim python2.7 sudo
+    update-alternatives --install /usr/bin/python python /usr/bin/python2.7 1
 }
 
 get_tools() {
@@ -41,7 +41,7 @@ get_tools() {
 
 get_chromium() {
     msg "Getting chromium..."
-    
+
     cd ${CHROMIUM_DIR}
     fetch chromium
     cd ${CHROMIUM_SRC_DIR}
