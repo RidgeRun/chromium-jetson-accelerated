@@ -1,0 +1,24 @@
+commit 513d6d2ac8e2d409ac2f5e01278aecdabf2a7637
+Author: Anuma Rathore <arathore@nvidia.com>
+Date:   Wed Feb 3 22:41:15 2021 -0800
+
+     0002-Fix-crash-for-EGL-on-Jetson
+    
+    This patch fixes the crash in the gpu process
+    due to egl log issue.
+    The patch is kept separate to track the fix upstream.
+
+diff --git a/ui/gl/gl_surface_egl.cc b/ui/gl/gl_surface_egl.cc
+index 020f582..7b895b4 100644
+--- a/ui/gl/gl_surface_egl.cc
++++ b/ui/gl/gl_surface_egl.cc
+@@ -759,7 +759,8 @@ static void EGLAPIENTRY LogEGLDebugMessage(EGLenum error,
+                                            const char* message) {
+   std::string formatted_message = std::string("EGL Driver message (") +
+                                   GetDebugMessageTypeString(message_type) +
+-                                  ") " + command + ": " + message;
++                                  ")" + ((command) ? command : "") + ": " +
++                                  ((message) ? message : "");
+ 
+   // Assume that all labels that have been set are strings
+   if (thread_label) {
