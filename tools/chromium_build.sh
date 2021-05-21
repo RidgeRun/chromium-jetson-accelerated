@@ -32,11 +32,19 @@ msg() {
     echo
 }
 
+create_dir() {
+    if [[ ! -d $1 ]]
+    then
+        mkdir -p $1
+    fi
+}
+
 prepare() {
     msg "Preparing..."
     
-    mkdir -p ${WORK_DIR}
-    mkdir -p ${CHROMIUM_DIR}
+    create_dir ${WORK_DIR}
+    create_dir ${CHROMIUM_DIR}
+    create_dir ${OUTPUT_DIR}
     apt-get update
     apt-get install -y git curl wget lsb-release vim python2.7 sudo
     update-alternatives --install /usr/bin/python python /usr/bin/python2.7 1
