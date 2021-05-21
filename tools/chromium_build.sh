@@ -1,5 +1,15 @@
 #!/bin/bash
 
+# This script will build chromium with accelerated decoding support for 
+# jetson platforms. The resulting debian will be in the $OUTPUT_DIR directory. 
+# If this folder doesn't exist, it will be created.
+#
+# This script can be run on your host machine, however, it is recommended to do it 
+# in a container. 
+# To create the container run the following command:
+#
+# sudo docker run --name chromium -it --privileged -v /home/$USER/chromium_output:/root/chromium_output ubuntu:18.04
+
 WORK_DIR=${HOME}/chromium
 
 TOOLS_REPO=https://chromium.googlesource.com/chromium/tools/depot_tools.git
